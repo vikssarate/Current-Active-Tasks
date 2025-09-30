@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>Current Due Task — Daily Reset Tracker</title>
+<link rel="icon" href="data:,">
+<style>
+  :root{
+    --bg:#0f1220; --card:#161b2b; --ink:#eef1ff; --muted:#9aa3c7; --line:#2a3052;
+    --accent:#6ca8ff; --ok:#7bd88f; --warn:#ffd166; --bad:#ff7575;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial}
+  a{color:var(--accent);text-decoration:none}
+  .wrap{max-width:1100px;margin:24px auto;padding:0 14px}
+  header{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+  h1{font-size:18px;margin:0}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;box-shadow:0 0 0 1px rgba(0,0,0,.05) inset}
+  .controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  button{background:var(--accent);color:#06102a;border:0;border-radius:10px;padding:8px 12px;font-weight:700;cursor:pointer}
+  button.secondary{background:#202a44;color:var(--ink);border:1px solid var(--line);font-weight:600}
+  button.small{padding:4px 8px;border-radius:8px;font-size:12px}
+  table{width:100%;border-collapse:separate;border-spacing:0 8px}
+  thead th{font-size:12px;color:var(--muted);text-align:left;padding:0 10px}
+  tbody td{background:#101731;border:1px solid var(--line);padding:10px;border-left:0;border-right:0}
+  tbody tr td:first-child{border-left:1px solid var(--line);border-radius:10px 0 0 10px}
+  tbody tr td:last-child{border-right:1px solid var(--line);border-radius:0 10px 10px 0}
+  input[type="text"]{width:100%;background:#0b1128;border:1px solid var(--line);color:var(--ink);
+    padding:8px 10px;border-radius:8px;outline:none}
+  input[type="text"]::placeholder{color:#6b7280}
+  .center{display:flex;align-items:center;justify-content:center}
+  .badge{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid var(--line);background:#0b1128;color:#9aa3c7;font-size:12px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .kpi{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--line);border-radius:10px;background:#0b1128}
+  .kpi .n{font-weight:800;font-size:18px}
+  .kpi .label{color:#9aa3c7;font-size:12px}
+  .right{text-align:right}
+  .del{background:#23121a;color:#ffd6da;border:1px solid #4b1a23}
+  .foot{display:flex;justify-content:flex-end;margin-top:6px;color:#9aa3c7;font-size:12px}
+  .checkbox{transform:scale(1.25)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Current Due Task</h1>
+    <div class="controls">
+      <span class="badge" id="todayLabel"></span>
+      <span class="badge" id="activeTopicsBadge" title="Topics not checked as done">Active Topics: 0</span>
+      <button id="addRow">+ Add Row</button>
+      <button id="resetToday" class="secondary">Reset Today</button>
+    </div>
+  </header>
+
+  <section class="panel">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:34px">#</th>
+          <th>Subject</th>
+          <th>Active Topic</th>
+          <th class="center" title="Mark when a planned chunk is completed">Due Topic Chunk</th>
+          <th class="center" title="Mark when today's topic is finished">Topic Done</th>
+          <th class="center" title="Mark when the whole subject is done">Subject Done</th>
+          <th style="width:64px"></th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="foot">Autosaves to your browser. Checkboxes reset at midnight.</div>
+  </section>
+
+  <h2 style="font-size:16px;margin:18px 0 8px">Today Progress Report</h2>
+  <section class="panel">
+    <div class="grid">
+      <div class="kpi">
+        <div class="n" id="chunksDoneN">0</div>
+        <div><div class="label">Chunks completed today</div><div class="label">Total today: <span id="chunksTotalN">0</span></div></div>
+      </div>
+      <div class="kpi">
+        <div class="n" id="topicsDoneN">0</div>
+        <div><div class="label">Topics done today</div><div class="label">Total active: <span id="topicsActiveN">0</span></div></div>
+      </div>
+      <div class="kpi">
+        <div class="n" id="subjectsDoneN">0</div>
+        <div><div class="label">Subjects done today</div><div class="label">Total active: <span id="subjectsActiveN">0</span></div></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+  // Keys
+  const TASKS_KEY = "cdt_tasks_v1";
+  const NEXTID_KEY = "cdt_nextid_v1";
+  const LASTDATE_KEY = "cdt_last_date_v1";
+  const statusKey = k => `cdt_status_${k}`;
+  const dateKey = (d=new Date()) => {
+    const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
+    return `${y}-${m}-${dd}`;
+  };
+
+  // Storage helpers
+  const loadTasks = () => { try { return JSON.parse(localStorage.getItem(TASKS_KEY)||"[]"); } catch { return []; } };
+  const saveTasks = a => { localStorage.setItem(TASKS_KEY, JSON.stringify(a)); render(); };
+  const nextId = () => { const n=+(localStorage.getItem(NEXTID_KEY)||"1"); localStorage.setItem(NEXTID_KEY,String(n+1)); return n; };
+  const loadStatus = dk => { try { return JSON.parse(localStorage.getItem(statusKey(dk))||"{}"); } catch { return {}; } };
+  const saveStatus = (dk,obj) => { localStorage.setItem(statusKey(dk), JSON.stringify(obj)); updateKPIs(); };
+
+  // DOM refs
+  const $rows = document.getElementById("rows");
+  const $addRow = document.getElementById("addRow");
+  const $resetToday = document.getElementById("resetToday");
+  const $todayLabel = document.getElementById("todayLabel");
+  const $activeTopicsBadge = document.getElementById("activeTopicsBadge");
+  const $chunksDoneN = document.getElementById("chunksDoneN");
+  const $chunksTotalN = document.getElementById("chunksTotalN");
+  const $topicsDoneN = document.getElementById("topicsDoneN");
+  const $topicsActiveN = document.getElementById("topicsActiveN");
+  const $subjectsDoneN = document.getElementById("subjectsDoneN");
+  const $subjectsActiveN = document.getElementById("subjectsActiveN");
+
+  function render(){
+    const tasks = loadTasks();
+    const dk = dateKey();
+    const st = loadStatus(dk);
+
+    $todayLabel.textContent = `Today: ${dk}`;
+    $rows.innerHTML = "";
+
+    tasks.forEach((t, i) => {
+      const s = st[t.id] || {chunk:false, topic:false, subject:false};
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td class="center">${i+1}</td>
+        <td><input type="text" placeholder="Subject…" value="${t.subject||""}"></td>
+        <td><input type="text" placeholder="Active topic…" value="${t.topic||""}"></td>
+        <td class="center"><input class="checkbox" type="checkbox" ${s.chunk?"checked":""}></td>
+        <td class="center"><input class="checkbox" type="checkbox" ${s.topic?"checked":""}></td>
+        <td class="center"><input class="checkbox" type="checkbox" ${s.subject?"checked":""}></td>
+        <td class="right"><button class="small del" title="Delete row">Delete</button></td>
+      `;
+
+      tr.children[1].querySelector("input").addEventListener("input", e => { t.subject=e.target.value; saveTasks(tasks); });
+      tr.children[2].querySelector("input").addEventListener("input", e => { t.topic=e.target.value; saveTasks(tasks); });
+
+      tr.children[3].querySelector("input").addEventListener("change", e => {
+        st[t.id] = st[t.id] || {chunk:false, topic:false, subject:false};
+        st[t.id].chunk = e.target.checked; saveStatus(dk, st);
+      });
+      tr.children[4].querySelector("input").addEventListener("change", e => {
+        st[t.id] = st[t.id] || {chunk:false, topic:false, subject:false};
+        st[t.id].topic = e.target.checked; saveStatus(dk, st);
+      });
+      tr.children[5].querySelector("input").addEventListener("change", e => {
+        st[t.id] = st[t.id] || {chunk:false, topic:false, subject:false};
+        st[t.id].subject = e.target.checked; saveStatus(dk, st);
+      });
+
+      tr.children[6].querySelector("button").addEventListener("click", () => {
+        saveTasks(loadTasks().filter(x => x.id !== t.id));
+      });
+
+      $rows.appendChild(tr);
+    });
+
+    updateKPIs();
+  }
+
+  function updateKPIs(){
+    const tasks = loadTasks();
+    const st = loadStatus(dateKey());
+    let chunksDone=0, topicsDone=0, subjectsDone=0;
+
+    tasks.forEach(t => {
+      const s = st[t.id] || {chunk:false, topic:false, subject:false};
+      if(s.chunk) chunksDone++;
+      if(s.topic) topicsDone++;
+      if(s.subject) subjectsDone++;
+    });
+
+    const totalRows = tasks.length;
+    const topicsActive = totalRows - topicsDone;
+    const subjectsActive = totalRows - subjectsDone;
+
+    document.getElementById("chunksDoneN").textContent = chunksDone;
+    document.getElementById("chunksTotalN").textContent = totalRows;
+    document.getElementById("topicsDoneN").textContent = topicsDone;
+    document.getElementById("topicsActiveN").textContent = topicsActive;
+    document.getElementById("subjectsDoneN").textContent = subjectsDone;
+    document.getElementById("subjectsActiveN").textContent = subjectsActive;
+    document.getElementById("activeTopicsBadge").textContent = `Active Topics: ${topicsActive}`;
+  }
+
+  // Add & Reset
+  document.getElementById("addRow").addEventListener("click", () => {
+    const tasks = loadTasks();
+    tasks.push({ id: (+(localStorage.getItem("cdt_nextid_v1")||"1")), subject:"", topic:"", created: Date.now() });
+    localStorage.setItem("cdt_nextid_v1", String((+(localStorage.getItem("cdt_nextid_v1")||"1")) + 1));
+    saveTasks(tasks);
+  });
+
+  function clearTodayStatuses(){
+    const dk = dateKey();
+    localStorage.removeItem(statusKey(dk));
+    localStorage.setItem(LASTDATE_KEY, dk);
+    render();
+  }
+  document.getElementById("resetToday").addEventListener("click", () => {
+    if(confirm("Reset all today's checkboxes?")) clearTodayStatuses();
+  });
+
+  // Midnight auto-reset (local time)
+  function ensureToday(){
+    const dk = dateKey();
+    const last = localStorage.getItem(LASTDATE_KEY);
+    if(last !== dk){
+      localStorage.setItem(LASTDATE_KEY, dk);
+      render(); // new day -> statuses appear unchecked
+    }
+  }
+  setInterval(ensureToday, 60*1000);
+  if(!localStorage.getItem(LASTDATE_KEY)) localStorage.setItem(LASTDATE_KEY, dateKey());
+
+  render();
+})();
+</script>
+</body>
+</html>
