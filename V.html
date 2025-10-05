@@ -105,7 +105,8 @@
 
   // Storage helpers
   const loadTasks = () => { try { return JSON.parse(localStorage.getItem(TASKS_KEY)||"[]"); } catch { return []; } };
-  const saveTasks = a => { localStorage.setItem(TASKS_KEY, JSON.stringify(a)); render(); };
+  // IMPORTANT: no render() inside saveTasks — avoids keyboard blur while typing
+  const saveTasks = a => { localStorage.setItem(TASKS_KEY, JSON.stringify(a)); };
   const nextId = () => { const n=+(localStorage.getItem(NEXTID_KEY)||"1"); localStorage.setItem(NEXTID_KEY,String(n+1)); return n; };
   const loadStatus = dk => { try { return JSON.parse(localStorage.getItem(statusKey(dk))||"{}"); } catch { return {}; } };
   const saveStatus = (dk,obj) => { localStorage.setItem(statusKey(dk), JSON.stringify(obj)); updateKPIs(); };
@@ -144,9 +145,17 @@
         <td class="right"><button class="small del" title="Delete row">Delete</button></td>
       `;
 
-      tr.children[1].querySelector("input").addEventListener("input", e => { t.subject=e.target.value; saveTasks(tasks); });
-      tr.children[2].querySelector("input").addEventListener("input", e => { t.topic=e.target.value; saveTasks(tasks); });
+      // Text fields: save ONLY, do not re-render (prevents keyboard/focus issues)
+      tr.children[1].querySelector("input").addEventListener("input", e => {
+        t.subject = e.target.value;
+        saveTasks(tasks);
+      });
+      tr.children[2].querySelector("input").addEventListener("input", e => {
+        t.topic = e.target.value;
+        saveTasks(tasks);
+      });
 
+      // Checkboxes: status + KPI updates (no full render needed)
       tr.children[3].querySelector("input").addEventListener("change", e => {
         st[t.id] = st[t.id] || {chunk:false, topic:false, subject:false};
         st[t.id].chunk = e.target.checked; saveStatus(dk, st);
@@ -160,8 +169,11 @@
         st[t.id].subject = e.target.checked; saveStatus(dk, st);
       });
 
+      // Delete row: save then re-render
       tr.children[6].querySelector("button").addEventListener("click", () => {
-        saveTasks(loadTasks().filter(x => x.id !== t.id));
+        const updated = loadTasks().filter(x => x.id !== t.id);
+        saveTasks(updated);
+        render();
       });
 
       $rows.appendChild(tr);
@@ -198,9 +210,12 @@
   // Add & Reset
   document.getElementById("addRow").addEventListener("click", () => {
     const tasks = loadTasks();
-    tasks.push({ id: (+(localStorage.getItem("cdt_nextid_v1")||"1")), subject:"", topic:"", created: Date.now() });
-    localStorage.setItem("cdt_nextid_v1", String((+(localStorage.getItem("cdt_nextid_v1")||"1")) + 1));
+    // keep existing id scheme exactly as-is
+    const next = +(localStorage.getItem("cdt_nextid_v1")||"1");
+    tasks.push({ id: next, subject:"", topic:"", created: Date.now() });
+    localStorage.setItem("cdt_nextid_v1", String(next + 1));
     saveTasks(tasks);
+    render(); // re-render because structure changed
   });
 
   function clearTodayStatuses(){
