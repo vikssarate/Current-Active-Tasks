@@ -40,6 +40,15 @@
   .del{background:#23121a;color:#ffd6da;border:1px solid #4b1a23}
   .foot{display:flex;justify-content:flex-end;margin-top:6px;color:#9aa3c7;font-size:12px}
   .checkbox{transform:scale(1.25)}
+
+  /* Tabs */
+  .tabs{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+  .tabbtn{background:#202a44;color:var(--ink);border:1px solid var(--line);border-radius:999px;padding:6px 10px;font-size:12px;cursor:pointer}
+  .tabbtn.active{background:var(--accent);color:#06102a;border-color:transparent}
+  .hidden{display:none}
+  textarea.syncbox{width:100%;min-height:140px;background:#0b1128;border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:10px}
+  .hint{color:#9aa3c7;font-size:12px;margin-top:6px}
+  .danger{background:#3b1a1f;color:#ffd6da;border:1px solid #5b1d27}
 </style>
 </head>
 <body>
@@ -54,41 +63,73 @@
     </div>
   </header>
 
-  <section class="panel">
-    <table>
-      <thead>
-        <tr>
-          <th style="width:34px">#</th>
-          <th>Subject</th>
-          <th>Active Topic</th>
-          <th class="center" title="Mark when a planned chunk is completed">Due Topic Chunk</th>
-          <th class="center" title="Mark when today's topic is finished">Topic Done</th>
-          <th class="center" title="Mark when the whole subject is done">Subject Done</th>
-          <th style="width:64px"></th>
-        </tr>
-      </thead>
-      <tbody id="rows"></tbody>
-    </table>
-    <div class="foot">Autosaves to your browser. Checkboxes reset at midnight.</div>
-  </section>
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tabbtn active" data-tab="tracker">Tracker</button>
+    <button class="tabbtn" data-tab="sync">Manual Sync</button>
+  </div>
 
-  <h2 style="font-size:16px;margin:18px 0 8px">Today Progress Report</h2>
-  <section class="panel">
-    <div class="grid">
-      <div class="kpi">
-        <div class="n" id="chunksDoneN">0</div>
-        <div><div class="label">Chunks completed today</div><div class="label">Total today: <span id="chunksTotalN">0</span></div></div>
+  <!-- Tab: Tracker (original UI) -->
+  <div id="tab-tracker">
+    <section class="panel">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:34px">#</th>
+            <th>Subject</th>
+            <th>Active Topic</th>
+            <th class="center" title="Mark when a planned chunk is completed">Due Topic Chunk</th>
+            <th class="center" title="Mark when today's topic is finished">Topic Done</th>
+            <th class="center" title="Mark when the whole subject is done">Subject Done</th>
+            <th style="width:64px"></th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="foot">Autosaves to your browser. Checkboxes reset at midnight.</div>
+    </section>
+
+    <h2 style="font-size:16px;margin:18px 0 8px">Today Progress Report</h2>
+    <section class="panel">
+      <div class="grid">
+        <div class="kpi">
+          <div class="n" id="chunksDoneN">0</div>
+          <div><div class="label">Chunks completed today</div><div class="label">Total today: <span id="chunksTotalN">0</span></div></div>
+        </div>
+        <div class="kpi">
+          <div class="n" id="topicsDoneN">0</div>
+          <div><div class="label">Topics done today</div><div class="label">Total active: <span id="topicsActiveN">0</span></div></div>
+        </div>
+        <div class="kpi">
+          <div class="n" id="subjectsDoneN">0</div>
+          <div><div class="label">Subjects done today</div><div class="label">Total active: <span id="subjectsActiveN">0</span></div></div>
+        </div>
       </div>
-      <div class="kpi">
-        <div class="n" id="topicsDoneN">0</div>
-        <div><div class="label">Topics done today</div><div class="label">Total active: <span id="topicsActiveN">0</span></div></div>
+    </section>
+  </div>
+
+  <!-- Tab: Manual Sync -->
+  <div id="tab-sync" class="hidden">
+    <section class="panel">
+      <h2 style="font-size:16px;margin:0 0 10px">Manual Sync</h2>
+      <div class="controls" style="margin-bottom:10px;flex-wrap:wrap">
+        <button id="exportBtn">Export JSON</button>
+        <button id="copyBtn" class="secondary">Copy JSON</button>
+        <input type="file" id="fileInput" accept="application/json" style="display:none">
+        <button id="importFileBtn" class="secondary">Import from File</button>
       </div>
-      <div class="kpi">
-        <div class="n" id="subjectsDoneN">0</div>
-        <div><div class="label">Subjects done today</div><div class="label">Total active: <span id="subjectsActiveN">0</span></div></div>
+
+      <textarea id="pasteBox" class="syncbox" placeholder='Paste exported JSON here to import…'></textarea>
+      <div class="controls" style="margin-top:8px;flex-wrap:wrap">
+        <button id="importReplace" class="danger">Import (Replace All)</button>
+        <button id="importMerge" class="secondary">Import (Merge Status Only)</button>
       </div>
-    </div>
-  </section>
+      <div class="hint">
+        <b>Replace All</b>: overwrites tasks, counters, and all per-day statuses.<br>
+        <b>Merge Status Only</b>: keeps your current tasks and counters, and only merges in any <code>cdt_status_YYYY-MM-DD</code> maps from the JSON.
+      </div>
+    </section>
+  </div>
 </div>
 
 <script>
@@ -105,30 +146,50 @@
 
   // Storage helpers
   const loadTasks = () => { try { return JSON.parse(localStorage.getItem(TASKS_KEY)||"[]"); } catch { return []; } };
-  const saveTasks = a => { localStorage.setItem(TASKS_KEY, JSON.stringify(a)); render(); };
+  // allow saving without re-render (prevents iPad keyboard glitches)
+  const saveTasks = (a, {rerender=true} = {}) => {
+    localStorage.setItem(TASKS_KEY, JSON.stringify(a));
+    if (rerender) render();
+  };
   const nextId = () => { const n=+(localStorage.getItem(NEXTID_KEY)||"1"); localStorage.setItem(NEXTID_KEY,String(n+1)); return n; };
   const loadStatus = dk => { try { return JSON.parse(localStorage.getItem(statusKey(dk))||"{}"); } catch { return {}; } };
   const saveStatus = (dk,obj) => { localStorage.setItem(statusKey(dk), JSON.stringify(obj)); updateKPIs(); };
+
+  // Lightweight, de-bounced local save for typing
+  let _typeSaveTimer = null;
+  function debouncedSaveLocal(tasks){
+    if (_typeSaveTimer) clearTimeout(_typeSaveTimer);
+    _typeSaveTimer = setTimeout(() => {
+      saveTasks(tasks, {rerender:false});
+    }, 150);
+  }
 
   // DOM refs
   const $rows = document.getElementById("rows");
   const $addRow = document.getElementById("addRow");
   const $resetToday = document.getElementById("resetToday");
-  const $todayLabel = document.getElementById("todayLabel");
-  const $activeTopicsBadge = document.getElementById("activeTopicsBadge");
-  const $chunksDoneN = document.getElementById("chunksDoneN");
-  const $chunksTotalN = document.getElementById("chunksTotalN");
-  const $topicsDoneN = document.getElementById("topicsDoneN");
-  const $topicsActiveN = document.getElementById("topicsActiveN");
-  const $subjectsDoneN = document.getElementById("subjectsDoneN");
-  const $subjectsActiveN = document.getElementById("subjectsActiveN");
 
+  // Tabs
+  const $tabBtns = document.querySelectorAll(".tabbtn");
+  const $tabTracker = document.getElementById("tab-tracker");
+  const $tabSync = document.getElementById("tab-sync");
+  $tabBtns.forEach(btn => {
+    btn.addEventListener("click", () => {
+      $tabBtns.forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      const t = btn.dataset.tab;
+      if (t === "tracker"){ $tabTracker.classList.remove("hidden"); $tabSync.classList.add("hidden"); }
+      else { $tabSync.classList.remove("hidden"); $tabTracker.classList.add("hidden"); }
+    });
+  });
+
+  // Render tracker table
   function render(){
     const tasks = loadTasks();
     const dk = dateKey();
     const st = loadStatus(dk);
 
-    $todayLabel.textContent = `Today: ${dk}`;
+    document.getElementById("todayLabel").textContent = `Today: ${dk}`;
     $rows.innerHTML = "";
 
     tasks.forEach((t, i) => {
@@ -136,16 +197,23 @@
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td class="center">${i+1}</td>
-        <td><input type="text" placeholder="Subject…" value="${t.subject||""}"></td>
-        <td><input type="text" placeholder="Active topic…" value="${t.topic||""}"></td>
+        <td><input type="text" placeholder="Subject…" value="${t.subject||""}" autocomplete="off" autocorrect="off" spellcheck="false"></td>
+        <td><input type="text" placeholder="Active topic…" value="${t.topic||""}" autocomplete="off" autocorrect="off" spellcheck="false"></td>
         <td class="center"><input class="checkbox" type="checkbox" ${s.chunk?"checked":""}></td>
         <td class="center"><input class="checkbox" type="checkbox" ${s.topic?"checked":""}></td>
         <td class="center"><input class="checkbox" type="checkbox" ${s.subject?"checked":""}></td>
         <td class="right"><button class="small del" title="Delete row">Delete</button></td>
       `;
 
-      tr.children[1].querySelector("input").addEventListener("input", e => { t.subject=e.target.value; saveTasks(tasks); });
-      tr.children[2].querySelector("input").addEventListener("input", e => { t.topic=e.target.value; saveTasks(tasks); });
+      // Subject typing -> save to localStorage only (no re-render)
+      const subjInput = tr.children[1].querySelector("input");
+      subjInput.addEventListener("input", e => { t.subject=e.target.value; debouncedSaveLocal(tasks); });
+      subjInput.addEventListener("blur", () => render());
+
+      // Topic typing -> same behavior
+      const topicInput = tr.children[2].querySelector("input");
+      topicInput.addEventListener("input", e => { t.topic=e.target.value; debouncedSaveLocal(tasks); });
+      topicInput.addEventListener("blur", () => render());
 
       tr.children[3].querySelector("input").addEventListener("change", e => {
         st[t.id] = st[t.id] || {chunk:false, topic:false, subject:false};
@@ -161,7 +229,7 @@
       });
 
       tr.children[6].querySelector("button").addEventListener("click", () => {
-        saveTasks(loadTasks().filter(x => x.id !== t.id));
+        saveTasks(loadTasks().filter(x => x.id !== t.id)); // default rerender = true
       });
 
       $rows.appendChild(tr);
@@ -200,7 +268,7 @@
     const tasks = loadTasks();
     tasks.push({ id: (+(localStorage.getItem("cdt_nextid_v1")||"1")), subject:"", topic:"", created: Date.now() });
     localStorage.setItem("cdt_nextid_v1", String((+(localStorage.getItem("cdt_nextid_v1")||"1")) + 1));
-    saveTasks(tasks);
+    saveTasks(tasks); // rerender
   });
 
   function clearTodayStatuses(){
@@ -225,6 +293,112 @@
   setInterval(ensureToday, 60*1000);
   if(!localStorage.getItem(LASTDATE_KEY)) localStorage.setItem(LASTDATE_KEY, dateKey());
 
+  // ---------- Manual Sync helpers ----------
+  function collectAll(){
+    const data = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      items: {}
+    };
+    // core keys
+    data.items[TASKS_KEY] = localStorage.getItem(TASKS_KEY) || "[]";
+    data.items[NEXTID_KEY] = localStorage.getItem(NEXTID_KEY) || "1";
+    data.items[LASTDATE_KEY] = localStorage.getItem(LASTDATE_KEY) || dateKey();
+    // all per-day status maps
+    Object.keys(localStorage).forEach(k => {
+      if (k.startsWith("cdt_status_")){
+        data.items[k] = localStorage.getItem(k);
+      }
+    });
+    return data;
+  }
+
+  function downloadJSON(obj, filename="cdt-manual-sync.json"){
+    const blob = new Blob([JSON.stringify(obj,null,2)], {type:"application/json"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  }
+
+  async function copyJSON(obj){
+    try{
+      await navigator.clipboard.writeText(JSON.stringify(obj,null,2));
+      alert("JSON copied to clipboard.");
+    }catch{
+      alert("Copy failed. Your browser might block clipboard access.");
+    }
+  }
+
+  function parsePasted(){
+    const txt = document.getElementById("pasteBox").value.trim();
+    if(!txt){ alert("Paste JSON first."); return null; }
+    try{ return JSON.parse(txt); }catch{ alert("Invalid JSON."); return null; }
+  }
+
+  function applyReplaceAll(payload){
+    if(!payload || !payload.items){ alert("Bad payload."); return; }
+    // wipe all cdt_* keys
+    Object.keys(localStorage).forEach(k => {
+      if (k.startsWith("cdt_")) localStorage.removeItem(k);
+    });
+    // write everything from payload
+    Object.entries(payload.items).forEach(([k,v]) => {
+      localStorage.setItem(k, String(v));
+    });
+    render();
+    alert("Import complete (replaced all).");
+  }
+
+  function applyMergeStatusOnly(payload){
+    if(!payload || !payload.items){ alert("Bad payload."); return; }
+    // merge only cdt_status_* maps; keep current tasks/counters
+    Object.entries(payload.items).forEach(([k,v]) => {
+      if (k.startsWith("cdt_status_")){
+        // if both exist, merge shallowly (per task id flags)
+        const incoming = JSON.parse(v || "{}");
+        const current = JSON.parse(localStorage.getItem(k) || "{}");
+        localStorage.setItem(k, JSON.stringify(Object.assign({}, current, incoming)));
+      }
+    });
+    updateKPIs();
+    alert("Import complete (merged statuses).");
+  }
+
+  // Sync UI events
+  document.getElementById("exportBtn").addEventListener("click", () => downloadJSON(collectAll()));
+  document.getElementById("copyBtn").addEventListener("click", () => copyJSON(collectAll()));
+
+  const fileInput = document.getElementById("fileInput");
+  document.getElementById("importFileBtn").addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", async () => {
+    const f = fileInput.files && fileInput.files[0];
+    if(!f) return;
+    try{
+      const txt = await f.text();
+      document.getElementById("pasteBox").value = txt;
+      alert("File loaded. Review JSON below, then choose an import option.");
+    }catch(e){
+      alert("Failed to read file.");
+    }finally{
+      fileInput.value = "";
+    }
+  });
+
+  document.getElementById("importReplace").addEventListener("click", () => {
+    const p = parsePasted(); if(!p) return;
+    if(confirm("This will replace ALL tasks and statuses. Continue?")){
+      applyReplaceAll(p);
+    }
+  });
+  document.getElementById("importMerge").addEventListener("click", () => {
+    const p = parsePasted(); if(!p) return;
+    applyMergeStatusOnly(p);
+  });
+
+  // initial render
   render();
 })();
 </script>
